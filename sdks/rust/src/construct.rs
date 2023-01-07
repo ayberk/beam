@@ -24,16 +24,15 @@ impl PipelineHolder {
             counter: RefCell::new(0),
         }
     }
-
     // Actually "applies" a transform, i.e. adds it (and any transforms it
     // calls in its expansion method) to the underlying graph.
     fn apply<'a, PIn, O: Any + 'static>(
         &self,
-        name: &String,
+        name: &str,
         transform: &dyn PTransform<'a, PIn, PCollection<'a, O>>,
-        input: &PIn,
+        input: Vec<&PIn>,
         input_pcolls: &[&String],
-    ) -> PCollection<'a, O> {
+    ) -> Vec<PCollection<'a, O>> {
         let transform_id = format!("transform{}", self.counter.borrow());
         *self.counter.borrow_mut() += 1;
         let mut named_inputs: HashMap<String, String> = HashMap::new();
@@ -44,7 +43,7 @@ impl PipelineHolder {
         let unique_name = format!(
             "{}{}",
             self.name_prefix.borrow().last().unwrap(),
-            name.to_string()
+            name
         );
         let mut transform_proto = proto::PTransform {
             unique_name: unique_name.clone(),
@@ -72,8 +71,10 @@ impl PipelineHolder {
         let self_with_static_lifetime =
             unsafe { std::mem::transmute::<&PipelineHolder, &'static PipelineHolder>(&self) };
         // Actually call expand.
-        let out_pcoll =
-            transform.expand_internal(input, self_with_static_lifetime, &mut transform_proto);
+        let out_pcolls : Vec<_>  = input
+        .iter()
+        .flat_map(|i| transform.expand_internal(i, self_with_static_lifetime, &mut transform_proto))
+        .collect();
         // Record subtransforms and pop the stacks.
         for sibling in self.sibling_transforms.borrow().last().unwrap().iter() {
             transform_proto.subtransforms.push(sibling.to_string());
@@ -82,9 +83,12 @@ impl PipelineHolder {
         self.name_prefix.borrow_mut().pop();
         // Populate any outputs.
         // TODO: Allow multiple outputs.
+        out_pcolls.iter().for_each(|o| {
+        let tag = format!("out_{}", o.id);
         transform_proto
             .outputs
-            .insert("out".to_string(), out_pcoll.id.to_string());
+            .insert(tag, o.id.to_string());
+        });
         // Actually stick the fully-constructed proto into the graph.
         self.pipeline
             .borrow_mut()
@@ -93,7 +97,7 @@ impl PipelineHolder {
             .unwrap()
             .transforms
             .insert(transform_id, transform_proto.clone());
-        out_pcoll
+        out_pcolls
     }
 
     pub fn create_pcollection_internal<O>(&self) -> PCollection<O> {
@@ -139,7 +143,7 @@ pub trait PTransform<'a, PIn, POut> {
     // This is what a typical transform author would implement,
     // using the public API to apply transformations to `input`
     // and returning the resulting PCollection(s).
-    fn expand(&self, input: &PIn) -> POut;
+    fn expand(&self, input: Vec<&PIn>) -> Vec<POut>;
 
     // This is for implementing primitives or other transforms that need
     // to augment the proto spec directly and/or create new PCollections
@@ -149,8 +153,8 @@ pub trait PTransform<'a, PIn, POut> {
         input: &PIn,
         _pipeline: &'a PipelineHolder,
         _transform_proto: &mut proto::PTransform,
-    ) -> POut {
-        self.expand(input)
+    ) -> Vec<POut> {
+       self.expand(vec!(input))
     }
 }
 
@@ -165,11 +169,10 @@ pub struct Root<'a> {
 impl<'a> Root<'a> {
     pub fn apply<O: Any + 'static>(
         &self,
-        // TODO: Should we be using str instead of &String? (Similar elsewhere.)
-        name: &String,
+        name: &str,
         transform: &dyn PTransform<'a, Root<'a>, PCollection<'a, O>>,
-    ) -> PCollection<'a, O> {
-        self.pipeline.apply(name, transform, &self, &[])
+    ) -> Vec<PCollection<'a, O>> {
+        self.pipeline.apply(name, transform, vec!{&self}, &[])
     }
 }
 
@@ -184,10 +187,10 @@ pub struct PCollection<'a, T: Any + 'static> {
 impl<'a, T: 'static> PCollection<'a, T> {
     pub fn apply<O: Any + 'static>(
         &self,
-        name: &String,
+        name: &str,
         transform: &dyn PTransform<'a, PCollection<'a, T>, PCollection<'a, O>>,
-    ) -> PCollection<O> {
-        self.pipeline.apply(name, transform, &self, &[&self.id])
+    ) -> Vec<PCollection<O>> {
+        self.pipeline.apply(name, transform, vec!(&self), &[&self.id])
     }
 
     // flat_map(name, func: Box<Fn>) would be a generic fn that calls

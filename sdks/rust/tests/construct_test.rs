@@ -25,9 +25,11 @@ mod construct_tests {
             // a bare ref...)
             struct RootComposite {}
             impl<'a> PTransform<'a, Root<'a>, PCollection<'a, String>> for RootComposite {
-                fn expand(&self, root: &Root<'a>) -> PCollection<'a, String> {
-                    root.apply(&"Inner".to_string(), &Impulse {});
-                    root.apply(&"Returned".to_string(), &Impulse {})
+                fn expand(&self, root: Vec<&Root<'a>>) -> Vec<PCollection<'a, String>> {
+                    vec!(
+                    root.first().unwrap().apply(&"Inner".to_string(), &Impulse {}),
+                    root.first().unwrap().apply(&"Returned".to_string(), &Impulse {})
+                    )
                 }
             }
 

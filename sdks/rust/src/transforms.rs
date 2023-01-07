@@ -17,7 +17,7 @@ use crate::worker::operators::IMPULSE_URN;
 pub struct Impulse {}
 
 impl<'x> PTransform<'x, Root<'x>, PCollection<'x, String>> for Impulse {
-    fn expand(&self, _input: &Root<'x>) -> PCollection<'x, String> {
+    fn expand(&self, _input: Vec<&Root<'x>>) -> Vec<PCollection<'x, String>> {
         panic!("TODO: Provide default impl when exandInternal implemented.");
     }
     fn expand_internal(
@@ -25,14 +25,14 @@ impl<'x> PTransform<'x, Root<'x>, PCollection<'x, String>> for Impulse {
         _input: &Root<'x>,
         pipeline: &'x PipelineHolder,
         transform_proto: &mut proto::PTransform,
-    ) -> PCollection<'x, String> {
+    ) -> Vec<PCollection<'x, String>> {
         // Update the spec to say how it's created.
         transform_proto.spec = Some(proto::FunctionSpec {
             urn: IMPULSE_URN.to_string(),
             payload: vec![],
         });
         // Created out of thin air.
-        pipeline.create_pcollection_internal()
+        vec!(pipeline.create_pcollection_internal())
     }
 }
 
